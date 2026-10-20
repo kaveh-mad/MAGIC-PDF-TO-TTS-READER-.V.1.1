@@ -226,6 +226,10 @@ main{overflow:auto!important;overscroll-behavior:contain;touch-action:pan-x pan-
 main.pinching{overflow:hidden!important}
 #pg{max-width:none!important;transform-origin:0 0}
 .night #cvSnap{filter:invert(1) hue-rotate(180deg)}
+
+/* Move tool = hand */
+body[data-tool=move] main{cursor:grab}
+main.panning,main.panning *{cursor:grabbing!important;user-select:none!important;-webkit-user-select:none!important}
 </style>
 </head>
 <body data-tool="">
@@ -289,7 +293,7 @@ main.pinching{overflow:hidden!important}
 
 <div class="tts" id="tts"><div class="barScroll" id="ttsScroll"><span class="dgrip" data-drag="tts" title="Drag">&#8942;&#8942;</span>
   <button class="save" data-i="play" onclick="speak()"><span class="l">Read</span></button>
-  <button class="dng" data-i="stop" onclick="try{speechSynthesis.cancel()}catch(e){};try{if(window._ttsAudio){window._ttsAudio.pause();window._ttsAudio=null}}catch(e){}"><span class="l">Stop</span></button>
+  <button class="dng" data-i="stop" onclick="ttsStopAll()"><span class="l">Stop</span></button>
   <select id="tm" title="What to read"><option value="auto">Selection/page</option><option value="all">All highlights</option></select>
   <select id="tg" title="Reading language"><option value="auto">Auto lang</option><option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-AU">English (Australia)</option><option value="en-CA">English (Canada)</option><option value="he-IL">Hebrew (עברית)</option><option value="fa-IR">Persian</option><option value="ar-SA">Arabic</option><option value="hi-IN">Hindi (India)</option><option value="ur-PK">Urdu</option><option value="ja-JP">Japanese</option><option value="zh-CN">Chinese (Simplified)</option><option value="zh-TW">Chinese (Traditional)</option><option value="ko-KR">Korean</option><option value="de-DE">German</option><option value="fr-FR">French</option><option value="es-ES">Spanish</option><option value="it-IT">Italian</option><option value="pt-BR">Portuguese (Brazil)</option><option value="pt-PT">Portuguese (Portugal)</option><option value="ru-RU">Russian</option><option value="tr-TR">Turkish</option><option value="nl-NL">Dutch</option><option value="pl-PL">Polish</option><option value="sv-SE">Swedish</option><option value="id-ID">Indonesian</option><option value="th-TH">Thai</option><option value="vi-VN">Vietnamese</option></select>
   <select id="tv" title="Voice"></select>
@@ -533,7 +537,7 @@ const PLATFORM='web';
 const S={pdf:null,bytes:null,name:'',key:'',page:1,scale:1,tool:'',color:'#fdd835',hl:[],ink:[],notes:[],texts:[],covers:[],imgs:[],hist:[],rf:false,txt:null,tok:0};
 const cv=$('cv'),ink=$('ink'),pg=$('pg'),tl=$('tl'),main=$('main');
 const toast=m=>{const t=$('toast');t.textContent=m;t.style.display='block';clearTimeout(toast.h);toast.h=setTimeout(()=>t.style.display='none',2600)};
-const dl=(blob,name)=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)};
+const dl=(blob,name)=>{const u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download=name;a.rel='noopener';a.style.display='none';document.body.appendChild(a);a.click();setTimeout(()=>{try{a.remove()}catch(e){}},1500);setTimeout(()=>URL.revokeObjectURL(u),900000)};
 const IDB_NAME='magic_pdf_tts',IDB_STORE='handles';
 function idb(){return new Promise((ok,no)=>{const q=indexedDB.open(IDB_NAME,1);q.onupgradeneeded=()=>q.result.createObjectStore(IDB_STORE);q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)})}
 async function storeDirHandle(h){try{const db=await idb();await new Promise((ok,no)=>{const t=db.transaction(IDB_STORE,'readwrite');t.objectStore(IDB_STORE).put(h,'saveDir');t.oncomplete=ok;t.onerror=()=>no(t.error)})}catch(e){}}
@@ -627,7 +631,7 @@ function showToolPop(btn){
 function hideToolPop(){const p=$('toolPop');if(p)p.style.display='none'}
 document.addEventListener('mousedown',e=>{if(!e.target.closest('#toolPop')&&!e.target.closest('#tools'))hideToolPop()});
 $('sz').oninput=e=>$('szv').textContent=e.target.value;
-$('tt').onchange=e=>{$('tts').classList.toggle('h',!e.target.checked);if(!e.target.checked)speechSynthesis.cancel()};
+$('tt').onchange=e=>{$('tts').classList.toggle('h',!e.target.checked);if(!e.target.checked)ttsStopAll()};
 document.addEventListener('mousedown',e=>{if(e.target.closest('button'))e.preventDefault()});
 
 $('fi').onchange=e=>{const f=e.target.files[0];if(f)openFile(f);e.target.value=''};
@@ -925,6 +929,28 @@ function _pinEnd(e){
   commitZoom(p.k,p.u,p.v,p.cx,p.cy)
 }
 main.addEventListener('touchend',_pinEnd);main.addEventListener('touchcancel',_pinEnd);
+// Move tool: drag the (zoomed) page like a hand tool
+(function(){
+  let pn=null;
+  main.addEventListener('pointerdown',e=>{
+    if(S.tool!=='move'||e.pointerType==='touch'||e.button!==0)return;
+    if(e.target.closest&&e.target.closest('.txbox,.note,.pim,.px,.rz,.rz2,.rzs,#nt>*,button,input,select,textarea,a,[contenteditable="true"]'))return;
+    pn={x:e.clientX,y:e.clientY,sl:main.scrollLeft,st:main.scrollTop,id:e.pointerId};
+    main.classList.add('panning');
+    try{main.setPointerCapture(e.pointerId)}catch(_){}
+    e.preventDefault()
+  },true);
+  main.addEventListener('pointermove',e=>{
+    if(!pn||e.pointerId!==pn.id)return;
+    main.scrollLeft=pn.sl-(e.clientX-pn.x);main.scrollTop=pn.st-(e.clientY-pn.y)
+  });
+  const end=e=>{
+    if(!pn)return;if(e&&e.pointerId!==undefined&&e.pointerId!==pn.id)return;
+    try{main.releasePointerCapture(pn.id)}catch(_){}
+    pn=null;main.classList.remove('panning')
+  };
+  main.addEventListener('pointerup',end);main.addEventListener('pointercancel',end);main.addEventListener('lostpointercapture',end);
+})();
 
 let cur=null;
 const pt=e=>{const r=ink.getBoundingClientRect();return[(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]};
@@ -1028,6 +1054,7 @@ document.addEventListener('pointerup',()=>{
 let VO=[];const FEM=/zira|samantha|susan|hazel|jenny|aria|sara|karen|moira|tessa|victoria|fiona|female|woman|google us english|helena|heera|catherine|linda|ava|allison|emma|libby|sonia|maria|zoe|kate|serena|nora|ioana|dariya|katja|hedda/i,MAL=/\bmale\b|david|mark|george|james|daniel|alex|fred|guy|ryan|thomas|rishi|oliver|ravi|stefan/i;
 function loadVoices(){VO=speechSynthesis.getVoices();const t=$('tv');t.length=0;t.add(new Option('Female (auto)','f'));t.add(new Option('Male (auto)','m'));VO.forEach((v,i)=>t.add(new Option(v.name+' ('+v.lang+')',i)))}
 speechSynthesis.onvoiceschanged=loadVoices;loadVoices();
+(function(){let w=0;const warm=()=>{if(w)return;w=1;try{if(!speechSynthesis.getVoices().length)return;const u=new SpeechSynthesisUtterance(' ');u.volume=0;u.rate=2;speechSynthesis.speak(u)}catch(e){}};['pointerdown','touchend','click'].forEach(n=>addEventListener(n,warm,{once:true,passive:true,capture:true}))})();
 const vl=x=>x.lang.toLowerCase().replace('_','-');
 const detect=t=>{
   if(/[\u0590-\u05FF]/.test(t))return 'he-IL';
@@ -1042,7 +1069,7 @@ const detect=t=>{
   if(/[\u0100-\u017F]/.test(t)&&/[ąćęłńóśźż]/.test(t.toLowerCase()))return 'pl-PL';
   return 'en-US'};
 function pickVoice(lang){const v=$('tv').value;if(v!=='f'&&v!=='m')return VO[v];
-  const lo=lang.toLowerCase(),ex=VO.filter(x=>vl(x)===lo),d=ex.length?ex:VO.filter(x=>vl(x).startsWith(lo.slice(0,2)));
+  const lo=lang.toLowerCase(),ex=VO.filter(x=>vl(x)===lo),d0=ex.length?ex:VO.filter(x=>vl(x).startsWith(lo.slice(0,2))),d=d0.filter(x=>x.localService).concat(d0.filter(x=>!x.localService));
   return d.find(x=>v==='f'?FEM.test(x.name)&&!MAL.test(x.name):MAL.test(x.name))||d[0]||null}
 function refreshTm(){const m=$('tm'),v=m.value;m.length=2;
   [...new Set(S.hl.map(h=>h.c))].forEach(c=>{const o=new Option('● '+c,c);o.style.color=c;m.add(o)});
@@ -1051,10 +1078,11 @@ window.toggleBarFold=function(){const b=$('mainBar'),btn=$('barFold');if(!b)retu
 window.toggleTtsFold=function(){const b=$('tts'),btn=$('ttsFold');if(!b)return;b.classList.toggle('folded');if(btn)btn.textContent=b.classList.contains('folded')?'▶':'◀'};
 window.toggleToolFold=function(){const b=$('toolBar'),btn=$('toolFold');if(!b)return;b.classList.toggle('folded');if(btn)btn.textContent=b.classList.contains('folded')?'▶':'◀'};
 window.toggleLiqFold=function(){const b=$('liqBar'),btn=$('liqFold');if(!b)return;b.classList.toggle('folded');if(btn)btn.textContent=b.classList.contains('folded')?'▶':'◀'};
+window.ttsStopAll=function(){window._ttsRun=(window._ttsRun||0)+1;try{speechSynthesis.cancel()}catch(e){}try{if(window._ttsAudio){window._ttsAudio.pause();window._ttsAudio=null}}catch(e){}try{if(window.AndroidSaver&&typeof AndroidSaver.ttsStop==='function')AndroidSaver.ttsStop()}catch(e){}window._ttsNat=null};
+window._ttsNativeEvent=function(ev){const n=window._ttsNat;if(!n)return;if(ev==='start')n.ok=true;else if(ev==='done'){window._ttsNat=null;n.res(true)}else if(ev==='error'){window._ttsNat=null;n.ok?n.res(true):n.rej(new Error('native tts error'))}};
 function speak(){
-  try{speechSynthesis.cancel()}catch(e){}
-  try{if(window._ttsAudio){window._ttsAudio.pause();window._ttsAudio=null}}catch(e){}
-  try{loadVoices()}catch(e){}
+  ttsStopAll();const run=window._ttsRun;
+  if(!VO.length){try{loadVoices()}catch(e){}}
   const m=$('tm').value;let text='';
   if(m==='auto')text=getSelection().toString().trim()||(S.rf||!S.pdf?(($('rf')&&$('rf').innerText)||''):((tl&&tl.innerText)||''));
   else text=S.hl.filter(h=>m==='all'||h.c===m).sort((a,b)=>a.p-b.p||a.r[0][1]-b.r[0][1]).map(h=>h.t).join('. ');
@@ -1069,61 +1097,73 @@ function speak(){
   const parts=[];
   const chunks=text.match(/[^.!?\n]+[.!?]?/g)||[text];
   chunks.forEach(x=>{const L=parts.length-1;if(L>=0&&parts[L].length+x.length<160)parts[L]+=x;else parts.push(x.trim())});
-  parts.filter(Boolean);
+  if(parts[0]&&parts[0].length>90){const a=parts[0],k=Math.max(a.lastIndexOf(' ',90),a.lastIndexOf(',',90));if(k>30){parts.splice(0,1,a.slice(0,k+1).trim(),a.slice(k+1).trim())}}
+  for(let z=parts.length-1;z>=0;z--)if(!parts[z]||!parts[z].trim())parts.splice(z,1);
 
   const speakDevice=()=>new Promise((resolve,reject)=>{
     if(!window.speechSynthesis)return reject(new Error('no speechSynthesis'));
+    let _nv=0;try{_nv=speechSynthesis.getVoices().length}catch(e){}
+    if(!_nv&&!VO.length)return reject(new Error('no device voices'));
     try{speechSynthesis.cancel()}catch(e){}
-    let i=0,ok=false;
-    const next=()=>{
-      if(i>=parts.length){resolve(ok);return}
-      const u=new SpeechSynthesisUtterance(parts[i++]);
+    window._ttsU=[];
+    let q=0,ok=false,fin=false;
+    const last=parts.length-1,end=()=>{if(!fin){fin=true;resolve(ok)}};
+    const mk=k=>{
+      const u=new SpeechSynthesisUtterance(parts[k]);
       u.lang=(v&&v.lang)||lg||'en-US';
       if(v){try{u.voice=v}catch(e){}}
       u.rate=rate;u.pitch=1;u.volume=1;
-      u.onstart=()=>{ok=true};
-      u.onend=next;
-      u.onerror=()=>{if(i>=parts.length&&!ok)reject(new Error('device fail'));else next()};
-      try{speechSynthesis.speak(u)}catch(e){reject(e)}
-    };
-    setTimeout(next,100);
-    setTimeout(()=>{if(!ok){try{speechSynthesis.cancel()}catch(e){}reject(new Error('device silent'))}},2500);
+      u.onstart=()=>{ok=true;enq()};
+      u.onend=()=>{if(k===last)end()};
+      u.onerror=e=>{const er=e&&e.error;if(er==='interrupted'||er==='canceled')return;if(!ok&&k===0){if(!fin){fin=true;reject(new Error('device fail'))}return}if(k===last)end();else enq()};
+      window._ttsU.push(u);return u};
+    const enq=()=>{if(run!==window._ttsRun)return;if(q>last)return;const k=q++;try{speechSynthesis.speak(mk(k))}catch(e){if(!fin){fin=true;reject(e)}}};
+    setTimeout(()=>{enq();enq()},30);
+    setTimeout(()=>{if(!ok&&!fin){try{speechSynthesis.cancel()}catch(e){}fin=true;reject(new Error('device silent'))}},3500);
   });
 
+  const speakNative=()=>new Promise((resolve,reject)=>{
+    const n={res:resolve,rej:reject,ok:false};window._ttsNat=n;
+    const g=$('tv').value;
+    let r='error';
+    try{r=AndroidSaver.ttsSpeak(JSON.stringify({parts:parts,lang:lg||'en-US',rate:rate,gender:g==='f'?'f':g==='m'?'m':''}))}catch(e){}
+    if(r!=='ok'){window._ttsNat=null;return reject(new Error('native tts: '+r))}
+    setTimeout(()=>{if(window._ttsNat===n&&!n.ok){window._ttsNat=null;try{AndroidSaver.ttsStop()}catch(e){}reject(new Error('native tts silent'))}},8000);
+  });
+
+  const gl=/^zh/i.test(lg||'')?'zh-CN':(langShort||'en');
   const speakGoogle=async()=>{
-    toast('Reading via Google…');
-    const maxLen=180;
-    const segs=[];
-    let buf='';
-    for(const w of text.split(' ')){
-      if((buf+' '+w).length>maxLen){if(buf)segs.push(buf);buf=w}else buf=(buf?buf+' ':'')+w;
-    }
+    toast('Phone voice not available – reading via Google (online)…');
+    const maxLen=180,segs=[];let buf='';
+    for(const w of text.split(' ')){if((buf+' '+w).length>maxLen){if(buf)segs.push(buf);buf=w}else buf=(buf?buf+' ':'')+w}
     if(buf)segs.push(buf);
+    const urls=seg=>['https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl='+gl+'&q='+encodeURIComponent(seg),
+                     'https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl='+gl+'&q='+encodeURIComponent(seg)];
+    const play=u=>new Promise((res,rej)=>{
+      const a=new Audio();window._ttsAudio=a;a.preload='auto';
+      a.onended=()=>res();a.onerror=()=>rej(new Error('audio error'));
+      a.src=u;a.playbackRate=Math.max(0.5,Math.min(1.5,rate));
+      const pr=a.play();if(pr&&pr.catch)pr.catch(rej)});
+    let okAny=false;
     for(const seg of segs){
-      const q=encodeURIComponent(seg);
-      const tl=encodeURIComponent(langShort||'en');
-      const url='https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl='+tl+'&q='+q;
-      await new Promise((res,rej)=>{
-        const a=new Audio(url);
-        window._ttsAudio=a;
-        a.onended=()=>res();
-        a.onerror=()=>rej(new Error('google tts block'));
-        a.playbackRate=Math.max(0.5,Math.min(1.5,rate));
-        a.play().catch(rej);
-      });
+      if(run!==window._ttsRun)return;
+      let played=false,le=null;
+      for(const u of urls(seg)){try{await play(u);played=true;break}catch(e){le=e;if(run!==window._ttsRun)return}}
+      if(!played){if(!okAny)throw le||new Error('google tts blocked');continue}
+      okAny=true;
     }
   };
 
   (async()=>{
-    try{
-      await speakDevice();
-    }catch(e1){
-      try{
-        await speakGoogle();
-      }catch(e2){
-        toast('TTS failed – install Google TTS in phone Settings, or allow internet for Google voice');
-      }
+    const live=()=>run===window._ttsRun;
+    // 1) the phone's own voice (Android TextToSpeech engine)
+    if(window.AndroidSaver&&typeof AndroidSaver.ttsSpeak==='function'){
+      try{await speakNative();return}catch(e0){if(!live())return}
     }
+    // 2) voices that the browser/WebView exposes
+    try{await speakDevice();return}catch(e1){if(!live())return}
+    // 3) Google online voice
+    try{await speakGoogle()}catch(e2){if(live())toast('TTS failed – turn on the internet, or install the Google Speech Services voice for this language in phone Settings')}
   })();
 }
 
@@ -2493,6 +2533,8 @@ async function annotated(){
   return doc}
 async function savePdf(){
   if(!S.bytes)return toast('Open a PDF first');
+  if(S._saving)return toast('Still saving – please wait…');
+  S._saving=true;
   toast('Saving...');
   try{
     if(S.rf&&$('rf')&&$('rf').contentEditable==='true'){S.rfHtml=$('rf').innerHTML;try{await syncLinks()}catch(e){}}
@@ -2504,7 +2546,7 @@ async function savePdf(){
   }catch(e){
     
     toast('Save failed: '+((e&&e.message)||String(e)||'unknown').slice(0,140));
-  }
+  }finally{S._saving=false}
 }
 
 async function place(aDoc,bBytes,pos){
@@ -2838,7 +2880,7 @@ async function runOcr(o){
     try{await saveBlob(new Blob([bytes],{type:'application/pdf'}),oname)}catch(e){}
     await reloadBytes(bytes,html);
     S.name=oname;drawTabs();
-    toast('OCR done → saved as '+oname+' (Downloads). Text is selectable.');
+    toast('OCR done → '+oname+' sent to Downloads. If your browser blocked it, press Save PDF. Text is selectable.');
   }catch(err){toast('OCR failed: '+(err.message||'unknown error'))}}
 const DEF_FONT='Segoe UI,Tahoma,sans-serif',CAND='Arial|Arial Black|Arial Narrow|Arial Rounded MT Bold|Arial Unicode MS|Bahnschrift|Calibri|Calibri Light|Cambria|Candara|Century Gothic|Comic Sans MS|Consolas|Constantia|Corbel|Courier New|Ebrima|Franklin Gothic Medium|Gabriola|Gadugi|Georgia|Impact|Ink Free|Javanese Text|Leelawadee UI|Lucida Console|Lucida Sans Unicode|Malgun Gothic|Microsoft Himalaya|Microsoft JhengHei|Microsoft Sans Serif|Microsoft Tai Le|Microsoft YaHei|Mongolian Baiti|MS Gothic|MS PGothic|MS UI Gothic|MV Boli|Myanmar Text|Nirmala UI|Palatino Linotype|Segoe Print|Segoe Script|Segoe UI|Segoe UI Emoji|Segoe UI Historic|Segoe UI Symbol|SimSun|NSimSun|SimHei|KaiTi|FangSong|Sitka Text|Sylfaen|Symbol|Tahoma|Times New Roman|Trebuchet MS|Verdana|Webdings|Wingdings|Yu Gothic|Yu Mincho|Meiryo|Meiryo UI|MS Mincho|MS PMincho|MingLiU|PMingLiU|Gulim|Dotum|Batang|Gungsuh|Cordia New|Angsana New|Browallia New|DaunPenh|Iskoola Pota|Kalinga|Kartika|Latha|Mangal|Raavi|Shruti|Tunga|Vrinda|Gautami|Aparajita|Kokila|Utsaah|Vani|Shonar Bangla|Estrangelo Edessa|Plantagenet Cherokee|Nyala|Andalus|Arabic Typesetting|Simplified Arabic|Traditional Arabic|Sakkal Majalla|Aharoni|David|FrankRuehl|Miriam|Narkisim|Rod|Gisha|Lucida Sans|Lucida Bright|Book Antiqua|Bookman Old Style|Century|Century Schoolbook|Garamond|Gill Sans MT|Haettenschweiler|Maiandra GD|Rockwell|Tw Cen MT|Perpetua|Baskerville Old Face|Bell MT|Bodoni MT|Brush Script MT|Copperplate Gothic Bold|Curlz MT|Elephant|Engravers MT|Goudy Old Style|Jokerman|Kristen ITC|Magneto|Mistral|Old English Text MT|Papyrus|Playbill|Pristina|Ravie|Showcard Gothic|Stencil|Vivaldi|Wide Latin|Helvetica|Helvetica Neue|Avenir|Menlo|Monaco|Optima|Palatino|Geeza Pro|Baghdad|Damascus|PingFang SC|Hiragino Sans|Apple SD Gothic Neo|Roboto|Noto Sans|Noto Serif|Noto Naskh Arabic|Noto Sans Arabic|Noto Sans CJK SC|Noto Sans CJK JP|Noto Sans Devanagari|Open Sans|Lato|DejaVu Sans|DejaVu Serif|DejaVu Sans Mono|Liberation Sans|Liberation Serif|Liberation Mono|Ubuntu|Cantarell|Droid Sans|Vazirmatn|Vazir|B Nazanin|IRANSans|Sahel|Samim|Shabnam'.split('|');
 const fcv=document.createElement('canvas').getContext('2d'),SERIF=/times|georgia|garamond|cambria|palatino|book|century|sitka|constantia|batang|mincho|simsun|ming|perpetua|bodoni|bell|goudy|rockwell|baskerville|david|rod|frank|traditional|noto serif|dejavu serif|liberation serif|sylfaen|nyala/i,MONO=/courier|consolas|mono|lucida console|menlo|monaco/i;
